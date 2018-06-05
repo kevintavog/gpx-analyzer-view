@@ -1,28 +1,44 @@
 <template>
   <div id="app">
-    <img src="./assets/logo.png">
-    <HelloWorld msg="Welcome to Your Vue.js App"/>
+    <TrackPanel />
+    <Map />
+    <TrackChart />
   </div>
 </template>
 
 <script>
-import HelloWorld from './components/HelloWorld.vue'
+import Map from './components/Map.vue'
+import TrackChart from './components/TrackChart.vue'
+import TrackPanel from './components/TrackPanel.vue'
 
 export default {
   name: 'app',
   components: {
-    HelloWorld
+    Map, TrackChart, TrackPanel
   }
 }
 </script>
 
 <style>
+
+.leaflet-fake-icon-image-2x {
+  background-image: url(../node_modules/leaflet/dist/images/marker-icon-2x.png);
+}
+.leaflet-fake-icon-shadow {
+  background-image: url(../node_modules/leaflet/dist/images/marker-shadow.png);
+}
+@import "../node_modules/leaflet/dist/leaflet.css";
+
 #app {
   font-family: 'Avenir', Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-align: center;
-  color: #2c3e50;
-  margin-top: 60px;
+  color: white;
+  width: 100%; 
+  height: 100%; 
+  margin: 0; 
+  display: flex;
+  flex-flow: column;
 }
+
 </style>
