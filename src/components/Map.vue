@@ -6,7 +6,6 @@
 
 <script>
 import { mapState } from 'vuex'
-import BinarySearch from '../utilities/binarySearch'
 import Geo from '../utilities/geo'
 import Leaflet from 'leaflet'
 import sprintf from 'sprintf-js'
@@ -78,7 +77,7 @@ export default {
             return ll
         })
 
-        var color = 'blue'
+        var color = this.runColor(r)
         var weight = 3
         var lineCap = 'square'
         var lineJoin = 'miter'
@@ -91,35 +90,23 @@ export default {
 
         switch (r.speedTypes[0].transportation) {
           case 'unknown':
-            color = 'red'
             dashArray = '2 2'
             break
-          case 'foot':
-            color = '#0000FF'
-            break
-          case 'bicycle':
-            color = '#3399CC'
-            break
           case 'car':
-            color = '#333333'
             dashArray = '2 2'
             break
           case 'train':
-            color = '#66CC66'
             dashArray = '3 3'
-            break
-          case 'plane':
-            color = '#663300'
             break
         }
 
         var runLine = new Leaflet.Polyline(
           runLatLngList,
           { color: color, weight: weight, clickable: true, lineCap: lineCap, lineJoin: lineJoin, dashArray: dashArray, opacity: opacity })
-
+        runLine.run = r
         runLine.on('click', e => {
           this.runLinePopup(track, r, e.latlng)
-          this.highlightRunLine(runLine)
+          this.highlightRunLine(runLine,)
         })
 
         trackRuns.push(runLine)
@@ -128,6 +115,32 @@ export default {
       runLayer.track = track
       runLayer.addTo(this.map)
       this.addToMapLayersControl(runLayer, '#' + trackNumber + ' runs')
+    },
+
+    runColor: function (run) {
+      var color = 'blue'
+      switch (run.speedTypes[0].transportation) {
+        case 'unknown':
+          color = 'red'
+          break
+        case 'foot':
+          color = '#0000FF'
+          break
+        case 'bicycle':
+          color = '#3399CC'
+          break
+        case 'car':
+          color = '#333333'
+          break
+        case 'train':
+          color = '#66CC66'
+          break
+        case 'plane':
+          color = '#663300'
+          break
+      }
+
+      return color
     },
 
     addDiscarded: function (track, trackNumber) {
@@ -186,7 +199,8 @@ export default {
       // remove highlighting of the first and highlight the second.
       // On the other hand, if a highlighted line is clicked, clear the highlight
       if (this.highlightedRunLine !== null) {
-        this.highlightedRunLine.setStyle({color: 'blue', weight: 3})
+        let color = this.runColor(this.highlightedRunLine.run)
+        this.highlightedRunLine.setStyle({color: color, weight: 3})
       }
 
       if (this.highlightedRunLine === runLine) {
@@ -233,8 +247,8 @@ export default {
       let content = sprintf.sprintf(
               'Run transportation: %s (%d%%) <br>' +
               'Point transportation: %s (%d%%) <br>' +
-              'Time: %s, %s <br>Distance from start: %f miles, %f kilometers <br>Duration from start: %s <br>' +
-              'Speed: %f mph <br>HDOP: %f <br>PDOP: %f <br>This run: %f miles, %f kilometers, %s',
+              'Time: %s, %s <br>Distance from start: %f miles, %f kilometers <br> Duration from start: %s <br>' +
+              'Speed: %f mph (smoothed: %f mph)<br>HDOP: %f <br>PDOP: %f <br>This run: %f miles, %f kilometers, %s',
               run.speedTypes[0].transportation,
               run.speedTypes[0].probability * 100,
               point.speedTypes[0].transportation,
@@ -244,7 +258,8 @@ export default {
               Geo.displayableDistance(Geo.kilometersToMiles(run.trackOffsetKilometers + point.kilometersIntoRun)),
               Geo.displayableDistance(run.trackOffsetKilometers + point.kilometersIntoRun),
               Geo.displayableDuration((run.trackOffsetSeconds + point.secondsIntoRun) * 1000),
-              Geo.metersPerSecondToMilesPerHour(point.gpx.speed).toFixed(2),
+              Geo.kilometersPerHourToMilesPerhHour(point.gpx.speedKmH).toFixed(2),
+              Geo.kilometersPerHourToMilesPerhHour(point.smoothedSpeedKmH).toFixed(2),
               point.gpx.hdop || 0,
               point.gpx.pdop || 0,
               Geo.displayableDistance(Geo.kilometersToMiles(run.kilometers)),

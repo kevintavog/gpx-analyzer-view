@@ -33,8 +33,12 @@ export default class Geo {
       return m / 1609.34
     }
   
+    static kilometersPerHourToMilesPerhHour (k) {
+      return k / 1.609344
+    }
+  
     static kilometersToMiles (k) {
-      return k / 1.60934
+      return k / 1.609344
     }
   
     static metersPerSecondToMilesPerHour (ms) {

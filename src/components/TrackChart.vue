@@ -72,11 +72,6 @@ export default {
           tooltips: {
             mode: 'index',
             intersect: false
-            // callbacks: {
-            //   footer: function(tooltipItems, data) {
-// console.log('tooltip footer: %o, %o', tooltipItems, data)
-            //   }
-            // }
           }
       }
     }
@@ -101,11 +96,10 @@ export default {
     },
 
     selectedPoint () {
-// console.log('ignoring selected point change')
-      // if (this.currentlySelectedPoint != this.selectedPoint) {
-      //   this.currentlySelectedPoint = this.selectedPoint
-      //   this.highlightPoint(this.selectedPoint)
-      // }
+      if (this.currentlySelectedPoint != this.selectedPoint) {
+        this.currentlySelectedPoint = this.selectedPoint
+        this.highlightPoint(this.selectedPoint)
+      }
     }
   },
 
@@ -123,7 +117,6 @@ export default {
         this.chart = new Chart(
           this.canvas, {
             type: 'bar',
-            // type: 'line',
             data: this.chartData,
             options: this.options,
         })
@@ -138,7 +131,13 @@ export default {
       })
 
       if (index >= 0 && index < this.allPoints.length) {
-        console.log('highlight: %o: %o', index, this.allPoints[index])
+        var activeElements = []
+        for (let setIndex = 0; setIndex < this.chartData.datasets.length; ++setIndex) {
+          activeElements.push(this.chart.getDatasetMeta(setIndex).data[index])
+        }
+        this.chart.tooltip._active = activeElements
+        this.chart.tooltip.update(true)
+        this.chart.draw()
       }
     },
 
@@ -159,8 +158,6 @@ export default {
         return
       }
 
-//      this.chart.options.scales.yAxes[0].ticks.max =  Math.ceil(Geo.kilometersToMiles(this.maxSpeedKmH))
-
       // There will be one data point per second. Multiple tracks are done one after the other.
       this.allPoints = []
       this.stats.tracks.forEach(t => {
@@ -169,50 +166,67 @@ export default {
         })
       })
 
+      let maxSpeed = 0
+      this.allPoints.forEach(p => {
+        maxSpeed = Math.max(maxSpeed, p.gpx.speedKmH)
+      })
+      // Make the highest speed tick/mark be the closest modulo 10 above the max speed
+      maxSpeed = Math.ceil(Geo.kilometersPerHourToMilesPerhHour(maxSpeed) / 10) * 10
+      this.chart.options.scales.yAxes[0].ticks.max = maxSpeed
+
       this.chartData.labels = this.allPoints.map(String.prototype.valueOf, '')
       this.chartData.datasets = []
       // this.chartData.datasets.push({
       //   backgroundColor: 'rgba(0, 0, 0, 0)',
       //   borderColor: 'rgba(255, 2, 2, 0.9)',
       //   borderWidth: 1,
-      //   data: this.allPoints.map(p => p ? Geo.metersPerSecondToMilesPerHour(p.gpx.speed).toFixed(2) : NaN),
-      //   fill: false,
-      //   label: 'GPX speed',
+      //   data: this.allPoints.map(p => p ? Geo.kilometersPerHourToMilesPerhHour(p.gpx.speedKmH).toFixed(2) : NaN),
+      //   label: 'Speed',
       //   pointRadius: 0,
       //   type: 'line',
       //   yAxisID: "y-axis-speed"
       // })
 
+      this.chartData.datasets.push({
+        backgroundColor: 'rgba(0, 0, 0, 0)',
+        borderColor: 'rgba(10, 255, 255, 0.9)',
+        borderWidth: 1,
+        data: this.allPoints.map(p => p ? Geo.kilometersPerHourToMilesPerhHour(p.smoothedSpeedKmH).toFixed(2) : NaN),
+        label: 'Speed',
+        pointRadius: 0,
+        type: 'line',
+        yAxisID: "y-axis-speed"
+      })
+
       // this.chartData.datasets.push({
-      //   backgroundColor: 'rgba(0, 0, 0, 0)',
-      //   borderColor: 'rgba(10, 255, 255, 0.9)',
-      //   borderWidth: 1,
-      //   data: this.allPoints.map(p => p ? Geo.metersPerSecondToMilesPerHour(p.smoothedGpxSpeed).toFixed(2) : NaN),
-      //   fill: false,
-      //   label: 'Smoothed speed',
-      //   pointRadius: 0,
-      //   type: 'line'
+      //   backgroundColor: 'rgba(0, 0, 255, 0.8)',
+      //   borderColor: 'rgba(0, 0, 255, 0.8)',
+      //   data: this.getTransporationValues('foot'),
+      //   label: 'foot %',
+      //   stack: 'transportation',
+      //   type: 'bar',
+      //   yAxisID: "y-axis-probability"
       // })
 
-      this.chartData.datasets.push({
-        backgroundColor: 'rgba(255, 255, 2, 0.8)',
-        borderColor: 'rgba(255, 255, 2, 0.8)',
-        data: this.getTransporationValues('foot'),
-        label: 'foot',
-        stack: 'transportation',
-        type: 'bar',
-        yAxisID: "y-axis-probability"
-      })
+      // this.chartData.datasets.push({
+      //   backgroundColor: 'rgba(51, 153, 204, 0.8)',
+      //   borderColor: 'rgba(51, 153, 204, 0.8)',
+      //   data: this.getTransporationValues('bicycle'),
+      //   label: 'bicycle %',
+      //   stack: 'transportation',
+      //   type: 'bar',
+      //   yAxisID: "y-axis-probability"
+      // })
 
-      this.chartData.datasets.push({
-        backgroundColor: 'rgba(2, 255, 2, 0.8)',
-        borderColor: 'rgba(2, 255, 2, 0.8)',
-        data: this.getTransporationValues('bicycle'),
-        label: 'bicycle',
-        stack: 'transportation',
-        type: 'bar',
-        yAxisID: "y-axis-probability"
-      })
+      // this.chartData.datasets.push({
+      //   backgroundColor: 'rgba(51, 51, 51, 0.8)',
+      //   borderColor: 'rgba(51, 51, 51, 0.8)',
+      //   data: this.getTransporationValues('car'),
+      //   label: 'car %',
+      //   stack: 'transportation',
+      //   type: 'bar',
+      //   yAxisID: "y-axis-probability"
+      // })
 
     }
   }
