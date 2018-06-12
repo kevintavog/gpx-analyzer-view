@@ -9,6 +9,7 @@ import { mapState } from 'vuex'
 import Geo from '../utilities/geo'
 import Leaflet from 'leaflet'
 import sprintf from 'sprintf-js'
+import '../leaflet-controls/GpxInfoControl'
 
 export default {
   name: 'Map',
@@ -17,10 +18,11 @@ export default {
     return {
       map: null,
       mapLayersControl: null,
+      mapMarker: null,
+      gpxInfoControl: null,
       highlightedRunLine: null,
       startIcon: null,
       endIcon: null,
-      pathPopup: new Leaflet.Popup(),
       currentlySelectedPoint: null
     }
   },
@@ -106,7 +108,9 @@ export default {
         runLine.run = r
         runLine.on('click', e => {
           this.runLinePopup(track, r, e.latlng)
-          this.highlightRunLine(runLine,)
+          this.highlightRunLine(runLine)
+          e.originalEvent._gpxHandled = true
+          e.originalEvent.stopImmediatePropagation()
         })
 
         trackRuns.push(runLine)
@@ -149,8 +153,10 @@ export default {
           color: '#ff8300',
           radius: 1.5
         })
-        m.on('click', _ => {
+        m.on('click', e => {
           this.showDiscardedPopup(track, p)
+          e.originalEvent._gpxHandled = true
+          e.originalEvent.stopImmediatePropagation()
         })
         return m
       })
@@ -180,8 +186,10 @@ export default {
           }
         }
         var m = new Leaflet.Circle([s.latitude, s.longitude], options)
-        m.on('click', _ => {
+        m.on('click', e => {
           this.showStopPopup(track, s)
+          e.originalEvent._gpxHandled = true
+          e.originalEvent.stopImmediatePropagation()
         })
         return m
       })
@@ -194,21 +202,21 @@ export default {
       }
     },
 
-    highlightRunLine: function (runLine) {
-      // No more than one line will be highlighted - if a second line is clicked,
-      // remove highlighting of the first and highlight the second.
-      // On the other hand, if a highlighted line is clicked, clear the highlight
+    clearHighlightRunLine: function () {
       if (this.highlightedRunLine !== null) {
         let color = this.runColor(this.highlightedRunLine.run)
         this.highlightedRunLine.setStyle({color: color, weight: 3})
-      }
-
-      if (this.highlightedRunLine === runLine) {
         this.highlightedRunLine = null
-      } else {
-        runLine.setStyle({color: '#AB8AFD', weight: 5})
-        this.highlightedRunLine = runLine
       }
+    },
+
+    highlightRunLine: function (runLine) {
+      // No more than one line will be highlighted - if a second line is clicked,
+      // remove highlighting of the first and highlight the second.
+      this.clearHighlightRunLine()
+
+      runLine.setStyle({color: '#AB8AFD', weight: 5})
+      this.highlightedRunLine = runLine
     },
 
     addToMapLayersControl: function (layer, name) {
@@ -245,39 +253,46 @@ export default {
     showRunPopup: function (run, point) {
       let timestamp = new Date(point.gpx.time)
       let content = sprintf.sprintf(
-              'Run transportation: %s (%d%%) <br>' +
-              'Point transportation: %s (%d%%) <br>' +
-              'Time: %s, %s <br>Distance from start: %f miles, %f kilometers <br> Duration from start: %s <br>' +
-              'Speed: %f mph (smoothed: %f mph)<br>HDOP: %f <br>PDOP: %f <br>This run: %f miles, %f kilometers, %s',
-              run.speedTypes[0].transportation,
-              run.speedTypes[0].probability * 100,
-              point.speedTypes[0].transportation,
-              point.speedTypes[0].probability * 100,
-              timestamp.toDateString(),
-              timestamp.toLocaleTimeString(),
-              Geo.displayableDistance(Geo.kilometersToMiles(run.trackOffsetKilometers + point.kilometersIntoRun)),
-              Geo.displayableDistance(run.trackOffsetKilometers + point.kilometersIntoRun),
-              Geo.displayableDuration((run.trackOffsetSeconds + point.secondsIntoRun) * 1000),
-              Geo.kilometersPerHourToMilesPerhHour(point.gpx.speedKmH).toFixed(2),
-              Geo.kilometersPerHourToMilesPerhHour(point.smoothedSpeedKmH).toFixed(2),
-              point.gpx.hdop || 0,
-              point.gpx.pdop || 0,
-              Geo.displayableDistance(Geo.kilometersToMiles(run.kilometers)),
-              Geo.displayableDistance(run.kilometers),
-              Geo.displayableDuration((run.seconds) * 1000))
+        '%s, %s <br>' +   // timestamp
+        '%f,%f <br>' +    // lat,lon
+        'Transportation: <br> <div class="gpx-info-tab">run: <b>%s</b> (%d%%)</div> <div class="gpx-info-tab">point: <b>%s</b> (%d%%)</div>' +
+        'From start: %f miles (%f km), %s <br>' +
+        'Speed: %f mph, smoothed: %f mph <br>HDOP: %f; PDOP: %f <br>This run is %f miles (%f km), %s',
+        timestamp.toDateString(),
+        timestamp.toLocaleTimeString(),
+        point.gpx.latitude,
+        point.gpx.longitude,
+        run.speedTypes[0].transportation,
+        run.speedTypes[0].probability * 100,
+        point.speedTypes[0].transportation,
+        point.speedTypes[0].probability * 100,
+        Geo.displayableDistance(Geo.kilometersToMiles(run.trackOffsetKilometers + point.kilometersIntoRun)),
+        Geo.displayableDistance(run.trackOffsetKilometers + point.kilometersIntoRun),
+        Geo.displayableDuration((run.trackOffsetSeconds + point.secondsIntoRun) * 1000),
+        Geo.kilometersPerHourToMilesPerhHour(point.gpx.speedKmH).toFixed(2),
+        Geo.kilometersPerHourToMilesPerhHour(point.smoothedSpeedKmH).toFixed(2),
+        point.gpx.hdop || 0,
+        point.gpx.pdop || 0,
+        Geo.displayableDistance(Geo.kilometersToMiles(run.kilometers)),
+        Geo.displayableDistance(run.kilometers),
+        Geo.displayableDuration((run.seconds) * 1000))
       this.showPopup(content, point.gpx.latitude, point.gpx.longitude, point)
     },
 
     showDiscardedPopup: function (track, point) {
       let timestamp = new Date(point.gpx.time)
       let content = sprintf.sprintf(
-              'Discarded: %s <br>Fix: %s <br>HDOP: %f <br>PDOP: %f <br>Time: %s, %s',
-              point.reason,
-              point.gpx.fix,
-              point.gpx.hdop,
-              point.gpx.pdop,
-              timestamp.toDateString(),
-              timestamp.toLocaleTimeString())
+        '%s, %s <br>' +   // timestamp
+        '%f,%f <br>' +    // lat,lon
+        '<b>Discarded: %s</b> <br>Fix: %s <br>HDOP: %f <br>PDOP: %f',
+        timestamp.toDateString(),
+        timestamp.toLocaleTimeString(),
+        point.gpx.latitude,
+        point.gpx.longitude,
+        point.reason,
+        point.gpx.fix,
+        point.gpx.hdop,
+        point.gpx.pdop)
       this.showPopup(content, point.gpx.latitude, point.gpx.longitude, null)
     },
 
@@ -286,20 +301,25 @@ export default {
       let startTimestamp = new Date(point.startTime)
       let endTimestamp = new Date(point.endTime)
       let content = sprintf.sprintf(
-              '%s for %s <br>Start: %s, %s <br>End: %s, %s',
-              type,
-              Geo.displayableDuration(point.durationSeconds * 1000),
-              startTimestamp.toDateString(),
-              startTimestamp.toLocaleTimeString(),
-              endTimestamp.toDateString(),
-              endTimestamp.toLocaleTimeString())
+        '%s, %s <br>' +   // timestamp
+        '%f,%f <br>' +    // lat,lon
+        '<b>%s</b> for %s <br>Start: %s, %s <br>End: %s, %s',
+        startTimestamp.toDateString(),
+        startTimestamp.toLocaleTimeString(),
+        point.latitude,
+        point.longitude,
+        type,
+        Geo.displayableDuration(point.durationSeconds * 1000),
+        startTimestamp.toDateString(),
+        startTimestamp.toLocaleTimeString(),
+        endTimestamp.toDateString(),
+        endTimestamp.toLocaleTimeString())
       this.showPopup(content, point.latitude, point.longitude, null)
     },
 
     showPopup: function(content, latitude, longitude, selectedPoint) {
-      this.pathPopup.setLatLng(new Leaflet.LatLng(latitude, longitude))
-      this.pathPopup.setContent(content)
-      this.map.openPopup(this.pathPopup)
+      this.gpxInfoControl.showInfo(content)
+      this.showMarker(latitude, longitude)
 
       if (selectedPoint) {
         this.currentlySelectedPoint = selectedPoint
@@ -309,12 +329,21 @@ export default {
       }
     },
 
-    // closeMapPopup: function () {
-    //   if (this.highlightedRunLine !== null) {
-    //     this.highlightedRunLine.setStyle({color: 'blue', weight: 3})
-    //     this.highlightedRunLine = null
-    //   }
-    // },
+    showMarker: function(latitude, longitude) {
+      if (!this.mapMarker) {
+        this.mapMarker = Leaflet.marker([latitude, longitude]).addTo(this.map)
+      } else {
+        this.mapMarker.setLatLng([latitude, longitude]).addTo(this.map)
+      }
+    },
+
+    hideMarker: function () {
+      this.mapMarker.removeFrom(this.map)
+    },
+
+    hideGpxInfo: function () {
+      this.gpxInfoControl.hideInfo()
+    },
 
     findNearestPoint: function (run, lat, lon) {
       var bestDistance
@@ -347,6 +376,7 @@ export default {
   },
 
   mounted: function () {
+
     var newMap = Leaflet.map('map', {
       center: [47.62060841124417, -122.3492968082428],
       zoom: 10,
@@ -356,34 +386,46 @@ export default {
 
     Leaflet.control.zoom({ position: 'topright' }).addTo(newMap)
 
+    this.gpxInfoControl = Leaflet.control.gpxInfoControl({ position: 'bottomleft' })
+    this.gpxInfoControl.addTo(newMap)
+
     Leaflet.tileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors'
     }).addTo(newMap)
 
     Leaflet.control.scale({ position: 'bottomright' }).addTo(newMap)
-
-    // newMap.on('popupclose', _ => {
-    //   this.closeMapPopup()
-    // })
-
     this.map = newMap
 
-    this.startIcon = new Leaflet.Icon({
-      iconUrl: 'static/run-start.png',
-      iconSize: [33, 50],
-      iconAnchor: [16, 44]
-    })
-    this.endIcon = new Leaflet.Icon({
-      iconUrl: 'static/run-end.png',
-      iconSize: [33, 50],
-      iconAnchor: [16, 44]
+    this.map.on('click', e => {
+      if (e.originalEvent._gpxHandled === true) {
+        return
+      }
+
+      this.hideMarker()
+      this.hideGpxInfo()
+      this.clearHighlightRunLine()
     })
   }
 }
 
 </script>
 
+<style>
+.gpx-info-control {
+  color: black;
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.8);
+}
+.gpx-info-tab {
+  margin-left: 10px;
+}
+</style>
 
 <style scoped>
 .trackMap {
