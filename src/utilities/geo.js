@@ -53,7 +53,7 @@ export default class Geo {
       } else if (d < 100) {
         return d.toFixed(1)
       }
-      return d
+      return d.toFixed(0)
     }
 
     static displayableDuration (milliseconds) {

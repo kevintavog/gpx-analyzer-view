@@ -7,9 +7,11 @@
 <script>
 import { mapState } from 'vuex'
 import Geo from '../utilities/geo'
+import Gpx from '../utilities/gpx'
 import Leaflet from 'leaflet'
 import sprintf from 'sprintf-js'
 import '../leaflet-controls/GpxInfoControl'
+import '../leaflet-controls/GpxTrackControl'
 
 export default {
   name: 'Map',
@@ -20,6 +22,10 @@ export default {
       mapLayersControl: null,
       mapMarker: null,
       gpxInfoControl: null,
+      gpxTrackControl: null,
+      currentTrack: -1,
+      currentRun: -1,
+      trackLayers: [],
       highlightedRunLine: null,
       startIcon: null,
       endIcon: null,
@@ -44,7 +50,7 @@ export default {
     selectedPoint () {
       if (this.currentlySelectedPoint !== this.selectedPoint) {
         this.currentlySelectedPoint = this.selectedPoint
-        let trackAndRun = this.findTrackAndRun(this.currentlySelectedPoint)
+        let trackAndRun = Gpx.findTrackAndRun(this.stats.tracks, this.currentlySelectedPoint)
         if (trackAndRun) {
           this.showRunPopup(trackAndRun.run, this.currentlySelectedPoint)
         }
@@ -56,22 +62,128 @@ export default {
     statsAdded: function () {
       this.clearMap()
 
+this.addOriginal(this.stats.original)
       // There are 0 to many tracks, each with
       //    0 to many runs
       //    0 to many discarded points
       //    0 to many stops
       // Map all runs as one layer & the discarded points & stops as seperate layers
       var trackNumber = 1
+      this.trackLayers = []
+      var transportationMap = {}
+      var stoppedDuration = 0
+      var discardedCount = 0
+
       this.stats.tracks.forEach(t => {
-        this.addRuns(t, trackNumber)
-        this.addStops(t, trackNumber)
+        let runs = this.addRuns(t, trackNumber)
+        let stops = this.addStops(t, trackNumber)
         this.addDiscarded(t, trackNumber)
         trackNumber += 1
+        this.trackLayers.push({ runs: runs, stops: stops })
+
+        t.runs.forEach(r => {
+          if (r.style === 'track') {
+            let type = r.speedTypes[0].transportation
+            if (type in transportationMap) {
+              var existing = transportationMap[type]
+              existing.kilometers += r.kilometers
+              existing.seconds += r.seconds
+            } else {
+              transportationMap[type] = { kilometers: r.kilometers, seconds: r.seconds }
+            }
+          }
+        })
+        t.stops.forEach(s => {
+          stoppedDuration += s.durationSeconds
+        })
+        discardedCount += t.discardedPoints.length
       })
+      this.currentTrack = 0
+      this.currentRun = 0
+      this.showRunInfo()
+
+      let startTime = new Date(this.stats.tracks[0].runs[0].points[0].gpx.time)
+      let lastTrack = this.stats.tracks[this.stats.tracks.length - 1]
+      let lastRun = lastTrack.runs[lastTrack.runs.length - 1]
+      let endTime = new Date(lastRun.points[lastRun.points.length - 1].gpx.time)
+
+      let transportation = this.formatTransporation(transportationMap, 'foot', 'On foot for') +
+        this.formatTransporation(transportationMap, 'bicycle', 'On a bicycle for') +
+        this.formatTransporation(transportationMap, 'car', 'In a vehicle for') +
+        this.formatTransporation(transportationMap, 'train', 'On a train for') +
+        this.formatTransporation(transportationMap, 'plane', 'On an airplane for')
+      let stopped = sprintf.sprintf('Stopped for %s <br>', Geo.displayableDuration(stoppedDuration * 1000))
+
+      let discarded = sprintf.sprintf('%d points were discarded', discardedCount)
+      if (discardedCount === 0) {
+        discarded = 'No points were discarded'
+      }
+
+      let content = sprintf.sprintf(
+        'GPX Overview <br>There %s %d track%s <br>' +
+        'From %s, %s - %s <br>' +
+        transportation + stopped + discarded,
+        this.stats.tracks.length === 1 ? 'is' : 'are',
+        this.stats.tracks.length,
+        this.stats.tracks.length === 1 ? '' : 's',
+        startTime.toDateString(),
+        startTime.toLocaleTimeString(),
+        endTime.toLocaleTimeString())
+      this.gpxTrackControl.showTrackInfo(content)
+      
+    },
+
+    formatTransporation: function(map, key, prefix) {
+      if (key in map) {
+        let val = map[key]
+        return sprintf.sprintf('%s %f miles (%f km), %s <br>', 
+          prefix, 
+          Geo.displayableDistance(Geo.kilometersToMiles(val.kilometers)),
+          Geo.displayableDistance(val.kilometers),
+          Geo.displayableDuration(val.seconds * 1000))
+      }
+      return ''
+    },
+
+    addOriginal: function (original) {
+      var circles = original.map(p => {
+        var m = new Leaflet.CircleMarker([p.latitude, p.longitude], {
+          color: '#ffff00',
+          radius: 1
+        })
+        m.on('click', e => {
+          let timestamp = new Date(p.time)
+          let content = sprintf.sprintf(
+            '%s, %s <br>' +   // timestamp
+            '%f,%f <br>' +    // lat,lon
+            'speed: %f mph (%f)' +
+            'course: %d',
+            timestamp.toDateString(),
+            timestamp.toLocaleTimeString(),
+            p.latitude,
+            p.longitude,
+            Geo.kilometersPerHourToMilesPerhHour(p.speedKmH).toFixed(2),
+            p.speed,
+            p.course)
+          this.showPopup(content, p.latitude, p.longitude, null)
+          e.originalEvent._gpxHandled = true
+          e.originalEvent.stopImmediatePropagation()
+        })
+        return m
+      })
+
+      if (circles.length > 0) {
+        // Add to the overlay control but NOT the map - that way, it'll be unchecked and not visible initially
+        var groupLayer = new Leaflet.FeatureGroup(circles)
+        groupLayer.addTo(this.map)
+        this.addToMapLayersControl(groupLayer, 'original')
+      }
+
     },
 
     addRuns: function (track, trackNumber) {
       var trackRuns = []
+      var runIndex = 0
       track.runs.forEach(r => {
         var runLatLngList = r.points.map(p => {
             var ll = new Leaflet.LatLng(p.gpx.latitude, p.gpx.longitude)
@@ -102,6 +214,7 @@ export default {
             break
         }
 
+        let capturedRunIndex = runIndex
         var runLine = new Leaflet.Polyline(
           runLatLngList,
           { color: color, weight: weight, clickable: true, lineCap: lineCap, lineJoin: lineJoin, dashArray: dashArray, opacity: opacity })
@@ -109,42 +222,22 @@ export default {
         runLine.on('click', e => {
           this.runLinePopup(track, r, e.latlng)
           this.highlightRunLine(runLine)
+          this.currentTrack = trackNumber - 1
+          this.currentRun = capturedRunIndex
+          this.showRunInfo()
           e.originalEvent._gpxHandled = true
           e.originalEvent.stopImmediatePropagation()
         })
 
+        runIndex += 1
         trackRuns.push(runLine)
       })
+
       var runLayer = new Leaflet.FeatureGroup(trackRuns)
       runLayer.track = track
       runLayer.addTo(this.map)
       this.addToMapLayersControl(runLayer, '#' + trackNumber + ' runs')
-    },
-
-    runColor: function (run) {
-      var color = 'blue'
-      switch (run.speedTypes[0].transportation) {
-        case 'unknown':
-          color = 'red'
-          break
-        case 'foot':
-          color = '#0000FF'
-          break
-        case 'bicycle':
-          color = '#3399CC'
-          break
-        case 'car':
-          color = '#333333'
-          break
-        case 'train':
-          color = '#66CC66'
-          break
-        case 'plane':
-          color = '#663300'
-          break
-      }
-
-      return color
+      return trackRuns
     },
 
     addDiscarded: function (track, trackNumber) {
@@ -154,6 +247,7 @@ export default {
           radius: 1.5
         })
         m.on('click', e => {
+          this.clearHighlightRunLine()
           this.showDiscardedPopup(track, p)
           e.originalEvent._gpxHandled = true
           e.originalEvent.stopImmediatePropagation()
@@ -185,8 +279,17 @@ export default {
             radius: 10 
           }
         }
+
+        // if (s.minLat) {
+        //   new Leaflet.Rectangle([[s.minLat, s.minLon], [s.maxLat, s.maxLon]], {
+        //     color: '#FF0000',
+        //     weight: 1
+        //   }).addTo(this.map)
+        // }
+
         var m = new Leaflet.Circle([s.latitude, s.longitude], options)
         m.on('click', e => {
+          this.clearHighlightRunLine()
           this.showStopPopup(track, s)
           e.originalEvent._gpxHandled = true
           e.originalEvent.stopImmediatePropagation()
@@ -200,6 +303,33 @@ export default {
         stopGroupLayer.addTo(this.map)
         this.addToMapLayersControl(stopGroupLayer, '#' + trackNumber + ' stops')
       }
+      return stopCircles
+    },
+
+    runColor: function (run) {
+      var color = 'blue'
+      switch (run.speedTypes[0].transportation) {
+        case 'unknown':
+          color = 'red'
+          break
+        case 'foot':
+          color = '#0000FF'
+          break
+        case 'bicycle':
+          color = '#3399CC'
+          break
+        case 'car':
+          color = '#333333'
+          break
+        case 'train':
+          color = '#66CC66'
+          break
+        case 'plane':
+          color = '#663300'
+          break
+      }
+
+      return color
     },
 
     clearHighlightRunLine: function () {
@@ -244,10 +374,37 @@ export default {
     },
 
     runLinePopup: function (track, run, latlng) {
-      var nearest = this.findNearestPoint(run, latlng.lat, latlng.lng)
+      var nearest = Gpx.findNearestPoint(run, latlng.lat, latlng.lng)
       if (nearest) {
         this.showRunPopup(run, nearest)
       }
+    },
+
+    showRunInfo: function () {
+      let track = this.stats.tracks[this.currentTrack]
+      let run = track.runs[this.currentRun]
+      let timestamp = new Date(run.points[0].gpx.time)
+      let lastTimestamp = new Date(run.points[run.points.length - 1].gpx.time)
+      let distance = Geo.displayableDistance(Geo.kilometersToMiles(run.kilometers))
+      let speed = (distance / (run.seconds / 3600)).toFixed(2)
+      let content = sprintf.sprintf(
+        'Track %d, run %d <br>' +
+        '%s, %s - %s <br>' +   // timestamp
+        'Transportation: <b>%s</b> (%d%%) <br>' +
+        'Distance: %f miles (%f km) <br>Time: %s <br>' +
+        'Average speed: %f mph',
+        this.currentTrack + 1,
+        this.currentRun + 1,
+        timestamp.toDateString(),
+        timestamp.toLocaleTimeString(),
+        lastTimestamp.toLocaleTimeString(),
+        run.speedTypes[0].transportation,
+        run.speedTypes[0].probability * 100,
+        distance,
+        Geo.displayableDistance(run.kilometers),
+        Geo.displayableDuration((run.seconds) * 1000),
+        speed)
+      this.gpxTrackControl.showRunInfo(content)
     },
 
     showRunPopup: function (run, point) {
@@ -290,9 +447,9 @@ export default {
         point.gpx.latitude,
         point.gpx.longitude,
         point.reason,
-        point.gpx.fix,
-        point.gpx.hdop,
-        point.gpx.pdop)
+        point.gpx.fix || '',
+        point.gpx.hdop || 0.0,
+        point.gpx.pdop || 0.0)
       this.showPopup(content, point.gpx.latitude, point.gpx.longitude, null)
     },
 
@@ -303,7 +460,8 @@ export default {
       let content = sprintf.sprintf(
         '%s, %s <br>' +   // timestamp
         '%f,%f <br>' +    // lat,lon
-        '<b>%s</b> for %s <br>Start: %s, %s <br>End: %s, %s',
+        '<b>%s</b> for %s <br>Start: %s, %s <br>End: %s, %s <br>' +
+        'distance: %f meters',
         startTimestamp.toDateString(),
         startTimestamp.toLocaleTimeString(),
         point.latitude,
@@ -313,7 +471,8 @@ export default {
         startTimestamp.toDateString(),
         startTimestamp.toLocaleTimeString(),
         endTimestamp.toDateString(),
-        endTimestamp.toLocaleTimeString())
+        endTimestamp.toLocaleTimeString(),
+        Geo.displayableDistance(point.distance * 1000))
       this.showPopup(content, point.latitude, point.longitude, null)
     },
 
@@ -338,45 +497,92 @@ export default {
     },
 
     hideMarker: function () {
-      this.mapMarker.removeFrom(this.map)
+      if (this.mapMarker) {
+        this.mapMarker.removeFrom(this.map)
+      }
     },
 
     hideGpxInfo: function () {
       this.gpxInfoControl.hideInfo()
     },
 
-    findNearestPoint: function (run, lat, lon) {
-      var bestDistance
-      var nearestPoint
-
-      var desiredPoint = { latitude: lat, longitude: lon }
-      run.points.forEach(pt => {
-        let d = Geo.getDistance(pt.gpx, desiredPoint)
-        if (!bestDistance || d < bestDistance) {
-          bestDistance = d
-          nearestPoint = pt
+    trackInfoSelect: function () {
+      if (this.stats.tracks) {
+        let info = this.getCurrentTrackInfo()
+        if (info && info.runLayer) {
+          if (info.runLayer === this.highlightedRunLine) {
+            this.clearHighlightRunLine()
+          } else {
+            this.highlightRunLine(info.runLayer)
+            this.fitCurrentRunBounds()
+          }
         }
-      })
-
-      return nearestPoint
+      }
     },
 
-    findTrackAndRun: function (point) {
-      var response = null
-      this.stats.tracks.forEach(t => {
-        t.runs.forEach(r => {
-          if (point.gpx.time >= r.points[0].gpx.time && point.gpx.time <= r.points[r.points.length - 1].gpx.time) {
-            response = { track: t, run: r }
+    trackInfoNext: function () {
+      if (this.stats.tracks) {
+        this.currentRun += 1
+        if (this.currentRun >= this.stats.tracks[this.currentTrack].runs.length) {
+          this.currentRun = 0
+          this.currentTrack += 1
+          if (this.currentTrack >= this.stats.tracks.length) {
+            this.currentTrack = 0
           }
-        })
-      })
+        }
 
-      return response
+        this.trackInfoSelect()
+        this.showRunInfo()
+        this.fitCurrentRunBounds()
+      }
+    },
+
+    trackInfoPrevious: function () {
+      if (this.stats.tracks) {
+        this.currentRun -= 1
+        if (this.currentRun < 0) {
+          this.currentTrack -= 1
+          if (this.currentTrack < 0) {
+            this.currentTrack = this.stats.tracks.length - 1
+          }
+          this.currentRun = this.stats.tracks[this.currentTrack].runs.length - 1
+        }
+        this.trackInfoSelect()
+        this.showRunInfo()
+        this.fitCurrentRunBounds()
+      }
+    },
+
+    trackInfoShowRunInfo: function () {
+      console.log('show run info')
+    },
+
+    trackInfoShowTrackInfo: function () {
+      console.log('show track info')
+    },
+
+    fitCurrentRunBounds: function () {
+      let run = this.stats.tracks[this.currentTrack].runs[this.currentRun]
+      this.map.fitBounds([
+        [run.minLat, run.minLon],
+        [run.maxLat, run.maxLon]
+      ])
+    },
+
+    getCurrentTrackInfo: function () {
+      if (!this.stats.tracks || this.currentTrack >= this.stats.tracks.length) {
+        return null
+      }
+      let track = this.stats.tracks[this.currentTrack]
+      if (this.currentRun >= track.runs.length) {
+        return null
+      }
+
+      return { run: track.runs[this.currentRun], runLayer: this.trackLayers[this.currentTrack].runs[this.currentRun]}
     }
   },
 
   mounted: function () {
-
     var newMap = Leaflet.map('map', {
       center: [47.62060841124417, -122.3492968082428],
       zoom: 10,
@@ -386,8 +592,8 @@ export default {
 
     Leaflet.control.zoom({ position: 'topright' }).addTo(newMap)
 
-    this.gpxInfoControl = Leaflet.control.gpxInfoControl({ position: 'bottomleft' })
-    this.gpxInfoControl.addTo(newMap)
+    this.gpxTrackControl = Leaflet.control.gpxTrackControl({ position: 'bottomleft' }).addTo(newMap)
+    this.gpxInfoControl = Leaflet.control.gpxInfoControl({ position: 'bottomleft' }).addTo(newMap)
 
     Leaflet.tileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -396,6 +602,26 @@ export default {
 
     Leaflet.control.scale({ position: 'bottomright' }).addTo(newMap)
     this.map = newMap
+
+    this.map.on('track-info-type-run', e => {     // eslint-disable-line no-unused-vars
+      this.trackInfoShowRunInfo()
+    })
+
+    this.map.on('track-info-type-track', e => {     // eslint-disable-line no-unused-vars
+      this.trackInfoShowTrackInfo()
+    })
+
+    this.map.on('track-info-previous', e => {     // eslint-disable-line no-unused-vars
+      this.trackInfoPrevious()
+    })
+
+    this.map.on('track-info-next', e => {        // eslint-disable-line no-unused-vars
+      this.trackInfoNext()
+    })
+
+    this.map.on('track-info-select', e => {       // eslint-disable-line no-unused-vars
+      this.trackInfoSelect()
+    })
 
     this.map.on('click', e => {
       if (e.originalEvent._gpxHandled === true) {
@@ -412,6 +638,26 @@ export default {
 </script>
 
 <style>
+.gpx-track-control {
+  color: black;
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  box-shadow: 0 0 1px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.8);
+}
+.gpx-track-control-button-container {
+  text-align: center;
+}
+.gpx-track-control-button {
+    display:inline-block;
+    margin-left:20px;
+    margin-right:20px;
+}
+.gpx-track-control-info {
+}
 .gpx-info-control {
   color: black;
   display: block;

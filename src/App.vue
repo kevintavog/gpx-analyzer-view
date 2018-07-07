@@ -2,7 +2,7 @@
   <div id="app">
     <TrackPanel />
     <Map />
-    <TrackChart />
+    <!-- <TrackChart /> -->
   </div>
 </template>
 

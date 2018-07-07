@@ -126,19 +126,47 @@ export default {
     },
 
     highlightPoint: function(pt) {
-      let index = BinarySearch.search(this.allPoints, pt, (a, b) => {
-        return new Date(a.gpx.time) - new Date(b.gpx.time)
-      })
+      let index = -1
+      let accumulatedPoints = 0
+      for (var trackIdx = 0; trackIdx < this.stats.tracks.length; trackIdx++) {
+        var track = this.stats.tracks[trackIdx]
+        for (var runIdx = 0; runIdx < track.runs.length && index < 0; runIdx++) {
+          var run = track.runs[runIdx]
+          if (pt.gpx.time >= run.points[0].gpx.time && pt.gpx.time <= run.points[run.points.length - 1].gpx.time) {
+            let pointIndex = BinarySearch.search(run.points, pt, (a, b) => {
+              return a.gpx.time - b.gpx.time
+            })
+            if (pointIndex >= 0 && pointIndex < run.points.length) {
+              index = pointIndex + accumulatedPoints
+              break
+            }
+          }
 
-      if (index >= 0 && index < this.allPoints.length) {
-        var activeElements = []
-        for (let setIndex = 0; setIndex < this.chartData.datasets.length; ++setIndex) {
-          activeElements.push(this.chart.getDatasetMeta(setIndex).data[index])
+          accumulatedPoints += run.points.length
         }
-        this.chart.tooltip._active = activeElements
-        this.chart.tooltip.update(true)
-        this.chart.draw()
       }
+
+console.log('index = ', index, 'trackIdx = ', trackIdx, "chart %o", this.chart)
+      // if (index >= 0 && index < this.allPoints.length) {
+      // }
+
+      // index = BinarySearch.search(this.allPoints, pt, (a, b) => {
+      //   // return new Date(a.gpx.time) - new Date(b.gpx.time)
+      //   return a.gpx.time - b.gpx.time
+      // })
+
+
+
+      // if (index >= 0 && index < this.allPoints.length) {
+      //   var activeElements = []
+      //   for (let setIndex = 0; setIndex < this.chartData.datasets.length; ++setIndex) {
+      //     activeElements.push(this.chart.getDatasetMeta(setIndex).data[index])
+      //   }
+      //   this.chart.tooltip._active = activeElements
+      //   this.chart.tooltip.update(true)
+      //   this.chart.update(0)                   // !!! The draw/update add a 1+ second delay with large data (2018-02-03)
+      //   // this.chart.draw()
+      // }
     },
 
     getTransporationValues: function(type) {
