@@ -156,7 +156,7 @@ this.addOriginal(this.stats.original)
           let content = sprintf.sprintf(
             '%s, %s <br>' +   // timestamp
             '%f,%f <br>' +    // lat,lon
-            'speed: %f mph (%f)' +
+            'speed: %f mph (%f) <br>' +
             'course: %d',
             timestamp.toDateString(),
             timestamp.toLocaleTimeString(),
@@ -175,7 +175,7 @@ this.addOriginal(this.stats.original)
       if (circles.length > 0) {
         // Add to the overlay control but NOT the map - that way, it'll be unchecked and not visible initially
         var groupLayer = new Leaflet.FeatureGroup(circles)
-        groupLayer.addTo(this.map)
+        // groupLayer.addTo(this.map)
         this.addToMapLayersControl(groupLayer, 'original')
       }
 
@@ -264,6 +264,7 @@ this.addOriginal(this.stats.original)
     },
 
     addStops: function (track, trackNumber) {
+      var stopRectangles = []
       var stopCircles = track.stops.map(s => {
         var options = {
           color: 'red',
@@ -280,12 +281,12 @@ this.addOriginal(this.stats.original)
           }
         }
 
-        // if (s.minLat) {
-        //   new Leaflet.Rectangle([[s.minLat, s.minLon], [s.maxLat, s.maxLon]], {
-        //     color: '#FF0000',
-        //     weight: 1
-        //   }).addTo(this.map)
-        // }
+        if (s.minLat) {
+          stopRectangles.push(new Leaflet.Rectangle([[s.minLat, s.minLon], [s.maxLat, s.maxLon]], {
+            color: '#FF0000',
+            weight: 1
+          }))
+        }
 
         var m = new Leaflet.Circle([s.latitude, s.longitude], options)
         m.on('click', e => {
@@ -302,7 +303,14 @@ this.addOriginal(this.stats.original)
         stopGroupLayer.track = track
         stopGroupLayer.addTo(this.map)
         this.addToMapLayersControl(stopGroupLayer, '#' + trackNumber + ' stops')
+
+        if (stopRectangles.length > 0) {
+          var stopRectangleLayer = new Leaflet.FeatureGroup(stopRectangles)
+          stopRectangleLayer.addTo(this.map)
+          this.addToMapLayersControl(stopRectangleLayer, '#' + trackNumber + ' rectangles')
+        }
       }
+
       return stopCircles
     },
 
