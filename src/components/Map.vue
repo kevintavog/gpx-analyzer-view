@@ -6,10 +6,9 @@
 
 <script>
 import { mapState } from 'vuex'
-import Geo from '../utilities/geo'
 import Gpx from '../utilities/gpx'
 import Leaflet from 'leaflet'
-import sprintf from 'sprintf-js'
+import MapPopupFormatter from '../utilities/mapPopupFormatter'
 import '../leaflet-controls/GpxInfoControl'
 import '../leaflet-controls/GpxTrackControl'
 
@@ -52,7 +51,8 @@ export default {
         this.currentlySelectedPoint = this.selectedPoint
         let trackAndRun = Gpx.findTrackAndRun(this.stats.tracks, this.currentlySelectedPoint)
         if (trackAndRun) {
-          this.showRunPopup(trackAndRun.run, this.currentlySelectedPoint)
+          let p = this.currentlySelectedPoint
+          this.showPopup(MapPopupFormatter.runPoint(trackAndRun.run, p), p.gpx.latitude, p.gpx.longitude, p)
         }
       }
     }
@@ -62,7 +62,8 @@ export default {
     statsAdded: function () {
       this.clearMap()
 
-this.addOriginal(this.stats.original)
+      this.addOriginal(this.stats.tracks[0].runs[0], this.stats.original)
+
       // There are 0 to many tracks, each with
       //    0 to many runs
       //    0 to many discarded points
@@ -102,70 +103,19 @@ this.addOriginal(this.stats.original)
       this.currentRun = 0
       this.showRunInfo()
 
-      let startTime = new Date(this.stats.tracks[0].runs[0].points[0].gpx.time)
-      let lastTrack = this.stats.tracks[this.stats.tracks.length - 1]
-      let lastRun = lastTrack.runs[lastTrack.runs.length - 1]
-      let endTime = new Date(lastRun.points[lastRun.points.length - 1].gpx.time)
-
-      let transportation = this.formatTransporation(transportationMap, 'foot', 'On foot for') +
-        this.formatTransporation(transportationMap, 'bicycle', 'On a bicycle for') +
-        this.formatTransporation(transportationMap, 'car', 'In a vehicle for') +
-        this.formatTransporation(transportationMap, 'train', 'On a train for') +
-        this.formatTransporation(transportationMap, 'plane', 'On an airplane for')
-      let stopped = sprintf.sprintf('Stopped for %s <br>', Geo.displayableDuration(stoppedDuration * 1000))
-
-      let discarded = sprintf.sprintf('%d points were discarded', discardedCount)
-      if (discardedCount === 0) {
-        discarded = 'No points were discarded'
-      }
-
-      let content = sprintf.sprintf(
-        'GPX Overview <br>There %s %d track%s <br>' +
-        'From %s, %s - %s <br>' +
-        transportation + stopped + discarded,
-        this.stats.tracks.length === 1 ? 'is' : 'are',
-        this.stats.tracks.length,
-        this.stats.tracks.length === 1 ? '' : 's',
-        startTime.toDateString(),
-        startTime.toLocaleTimeString(),
-        endTime.toLocaleTimeString())
+      let content = MapPopupFormatter.overview(transportationMap, stoppedDuration, discardedCount, this.stats.tracks)
       this.gpxTrackControl.showTrackInfo(content)
-      
+
     },
 
-    formatTransporation: function(map, key, prefix) {
-      if (key in map) {
-        let val = map[key]
-        return sprintf.sprintf('%s %f miles (%f km), %s <br>', 
-          prefix, 
-          Geo.displayableDistance(Geo.kilometersToMiles(val.kilometers)),
-          Geo.displayableDistance(val.kilometers),
-          Geo.displayableDuration(val.seconds * 1000))
-      }
-      return ''
-    },
-
-    addOriginal: function (original) {
+    addOriginal: function (run, original) {
       var circles = original.map(p => {
         var m = new Leaflet.CircleMarker([p.latitude, p.longitude], {
           color: '#ffff00',
           radius: 1
         })
         m.on('click', e => {
-          let timestamp = new Date(p.time)
-          let content = sprintf.sprintf(
-            '%s, %s <br>' +   // timestamp
-            '%f,%f <br>' +    // lat,lon
-            'speed: %f mph (%f) <br>' +
-            'course: %d',
-            timestamp.toDateString(),
-            timestamp.toLocaleTimeString(),
-            p.latitude,
-            p.longitude,
-            Geo.kilometersPerHourToMilesPerhHour(p.speedKmH).toFixed(2),
-            p.speed,
-            p.course)
-          this.showPopup(content, p.latitude, p.longitude, null)
+          this.showPopup(MapPopupFormatter.original(run.timezoneInfo, p), p.latitude, p.longitude, null)
           e.originalEvent._gpxHandled = true
           e.originalEvent.stopImmediatePropagation()
         })
@@ -178,7 +128,6 @@ this.addOriginal(this.stats.original)
         // groupLayer.addTo(this.map)
         this.addToMapLayersControl(groupLayer, 'original')
       }
-
     },
 
     addRuns: function (track, trackNumber) {
@@ -193,12 +142,10 @@ this.addOriginal(this.stats.original)
 
         var color = this.runColor(r)
         var weight = 3
-        var lineCap = 'square'
-        var lineJoin = 'miter'
         var dashArray = ''
         var opacity = 1.0
         if (r.style === 'virtual') {
-          opacity = 0.6
+          opacity = 0.7
           dashArray = '5 10'
         }
 
@@ -217,7 +164,7 @@ this.addOriginal(this.stats.original)
         let capturedRunIndex = runIndex
         var runLine = new Leaflet.Polyline(
           runLatLngList,
-          { color: color, weight: weight, clickable: true, lineCap: lineCap, lineJoin: lineJoin, dashArray: dashArray, opacity: opacity })
+          { color: color, weight: weight, clickable: true, dashArray: dashArray, opacity: opacity })
         runLine.run = r
         runLine.on('click', e => {
           this.runLinePopup(track, r, e.latlng)
@@ -248,7 +195,7 @@ this.addOriginal(this.stats.original)
         })
         m.on('click', e => {
           this.clearHighlightRunLine()
-          this.showDiscardedPopup(track, p)
+          this.showPopup(MapPopupFormatter.discarded(track, p), p.gpx.latitude, p.gpx.longitude, null)
           e.originalEvent._gpxHandled = true
           e.originalEvent.stopImmediatePropagation()
         })
@@ -291,7 +238,7 @@ this.addOriginal(this.stats.original)
         var m = new Leaflet.Circle([s.latitude, s.longitude], options)
         m.on('click', e => {
           this.clearHighlightRunLine()
-          this.showStopPopup(track, s)
+          this.showPopup(MapPopupFormatter.stop(track, s), s.latitude, s.longitude, null)
           e.originalEvent._gpxHandled = true
           e.originalEvent.stopImmediatePropagation()
         })
@@ -384,104 +331,15 @@ this.addOriginal(this.stats.original)
     runLinePopup: function (track, run, latlng) {
       var nearest = Gpx.findNearestPoint(run, latlng.lat, latlng.lng)
       if (nearest) {
-        this.showRunPopup(run, nearest)
+        this.showPopup(MapPopupFormatter.runPoint(run, nearest), nearest.gpx.latitude, nearest.gpx.longitude, nearest)
       }
     },
 
     showRunInfo: function () {
       let track = this.stats.tracks[this.currentTrack]
       let run = track.runs[this.currentRun]
-      let timestamp = new Date(run.points[0].gpx.time)
-      let lastTimestamp = new Date(run.points[run.points.length - 1].gpx.time)
-      let distance = Geo.displayableDistance(Geo.kilometersToMiles(run.kilometers))
-      let speed = (distance / (run.seconds / 3600)).toFixed(2)
-      let content = sprintf.sprintf(
-        'Track %d, run %d <br>' +
-        '%s, %s - %s <br>' +   // timestamp
-        'Transportation: <b>%s</b> (%d%%) <br>' +
-        'Distance: %f miles (%f km) <br>Time: %s <br>' +
-        'Average speed: %f mph',
-        this.currentTrack + 1,
-        this.currentRun + 1,
-        timestamp.toDateString(),
-        timestamp.toLocaleTimeString(),
-        lastTimestamp.toLocaleTimeString(),
-        run.speedTypes[0].transportation,
-        run.speedTypes[0].probability * 100,
-        distance,
-        Geo.displayableDistance(run.kilometers),
-        Geo.displayableDuration((run.seconds) * 1000),
-        speed)
+      let content = MapPopupFormatter.runInfo(this.currentTrack + 1, this.currentRun + 1, run)
       this.gpxTrackControl.showRunInfo(content)
-    },
-
-    showRunPopup: function (run, point) {
-      let timestamp = new Date(point.gpx.time)
-      let content = sprintf.sprintf(
-        '%s, %s <br>' +   // timestamp
-        '%f,%f <br>' +    // lat,lon
-        'Transportation: <br> <div class="gpx-info-tab">run: <b>%s</b> (%d%%)</div> <div class="gpx-info-tab">point: <b>%s</b> (%d%%)</div>' +
-        'From start: %f miles (%f km), %s <br>' +
-        'Speed: %f mph, smoothed: %f mph <br>HDOP: %f; PDOP: %f <br>This run is %f miles (%f km), %s',
-        timestamp.toDateString(),
-        timestamp.toLocaleTimeString(),
-        point.gpx.latitude,
-        point.gpx.longitude,
-        run.speedTypes[0].transportation,
-        run.speedTypes[0].probability * 100,
-        point.speedTypes[0].transportation,
-        point.speedTypes[0].probability * 100,
-        Geo.displayableDistance(Geo.kilometersToMiles(run.trackOffsetKilometers + point.kilometersIntoRun)),
-        Geo.displayableDistance(run.trackOffsetKilometers + point.kilometersIntoRun),
-        Geo.displayableDuration((run.trackOffsetSeconds + point.secondsIntoRun) * 1000),
-        Geo.kilometersPerHourToMilesPerhHour(point.gpx.speedKmH).toFixed(2),
-        Geo.kilometersPerHourToMilesPerhHour(point.smoothedSpeedKmH).toFixed(2),
-        point.gpx.hdop || 0,
-        point.gpx.pdop || 0,
-        Geo.displayableDistance(Geo.kilometersToMiles(run.kilometers)),
-        Geo.displayableDistance(run.kilometers),
-        Geo.displayableDuration((run.seconds) * 1000))
-      this.showPopup(content, point.gpx.latitude, point.gpx.longitude, point)
-    },
-
-    showDiscardedPopup: function (track, point) {
-      let timestamp = new Date(point.gpx.time)
-      let content = sprintf.sprintf(
-        '%s, %s <br>' +   // timestamp
-        '%f,%f <br>' +    // lat,lon
-        '<b>Discarded: %s</b> <br>Fix: %s <br>HDOP: %f <br>PDOP: %f',
-        timestamp.toDateString(),
-        timestamp.toLocaleTimeString(),
-        point.gpx.latitude,
-        point.gpx.longitude,
-        point.reason,
-        point.gpx.fix || '',
-        point.gpx.hdop || 0.0,
-        point.gpx.pdop || 0.0)
-      this.showPopup(content, point.gpx.latitude, point.gpx.longitude, null)
-    },
-
-    showStopPopup: function (track, point) {
-      let type = point.style === 'stopped' ? 'Stopped' : 'Paused'
-      let startTimestamp = new Date(point.startTime)
-      let endTimestamp = new Date(point.endTime)
-      let content = sprintf.sprintf(
-        '%s, %s <br>' +   // timestamp
-        '%f,%f <br>' +    // lat,lon
-        '<b>%s</b> for %s <br>Start: %s, %s <br>End: %s, %s <br>' +
-        'distance: %f meters',
-        startTimestamp.toDateString(),
-        startTimestamp.toLocaleTimeString(),
-        point.latitude,
-        point.longitude,
-        type,
-        Geo.displayableDuration(point.durationSeconds * 1000),
-        startTimestamp.toDateString(),
-        startTimestamp.toLocaleTimeString(),
-        endTimestamp.toDateString(),
-        endTimestamp.toLocaleTimeString(),
-        Geo.displayableDistance(point.distance * 1000))
-      this.showPopup(content, point.latitude, point.longitude, null)
     },
 
     showPopup: function(content, latitude, longitude, selectedPoint) {
@@ -561,14 +419,6 @@ this.addOriginal(this.stats.original)
       }
     },
 
-    trackInfoShowRunInfo: function () {
-      console.log('show run info')
-    },
-
-    trackInfoShowTrackInfo: function () {
-      console.log('show track info')
-    },
-
     fitCurrentRunBounds: function () {
       let run = this.stats.tracks[this.currentTrack].runs[this.currentRun]
       this.map.fitBounds([
@@ -611,13 +461,6 @@ this.addOriginal(this.stats.original)
     Leaflet.control.scale({ position: 'bottomright' }).addTo(newMap)
     this.map = newMap
 
-    this.map.on('track-info-type-run', e => {     // eslint-disable-line no-unused-vars
-      this.trackInfoShowRunInfo()
-    })
-
-    this.map.on('track-info-type-track', e => {     // eslint-disable-line no-unused-vars
-      this.trackInfoShowTrackInfo()
-    })
 
     this.map.on('track-info-previous', e => {     // eslint-disable-line no-unused-vars
       this.trackInfoPrevious()
