@@ -144,6 +144,26 @@ export default class MapPopupFormatter {
       point.course)
   }
 
+  static vector (vector, number, timezoneInfo) {
+    let time = MapPopupFormatter.getDisplayableTimestamp(vector.points[0].gpx.time, timezoneInfo)  
+    return sprintf.sprintf(
+        '%s, %s %s <br>' +   // timestamp
+        'Vector #%d <br>' +
+        'Distance: %f miles (%f km) <br>' +
+        'Duration: %s <br>' +
+        'Bearing: %d degrees <br>' +
+        'Number of points: %d',
+        time.date,
+        time.time,
+        time.tag,
+        number,
+        Geo.displayableDistance(Geo.kilometersToMiles(vector.distanceKm)),
+        Geo.displayableDistance(vector.distanceKm),
+        Geo.displayableDuration(vector.seconds * 1000),
+        vector.bearing,
+        vector.points.length)
+    }
+
   static discarded (track, point) {
     let time = MapPopupFormatter.getDisplayableTimestamp(point.gpx.time, track.runs[0].timezoneInfo)
     return sprintf.sprintf(

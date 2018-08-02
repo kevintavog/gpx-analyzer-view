@@ -176,6 +176,8 @@ export default {
           e.originalEvent.stopImmediatePropagation()
         })
 
+        this.addRunVectors(r, trackNumber, runIndex)
+
         runIndex += 1
         trackRuns.push(runLine)
       })
@@ -185,6 +187,36 @@ export default {
       runLayer.addTo(this.map)
       this.addToMapLayersControl(runLayer, '#' + trackNumber + ' runs')
       return trackRuns
+    },
+
+    addRunVectors: function (run, trackNumber, runNumber) {
+      var vectors = []
+      var vectorNumber = 0
+      run.vectors.forEach(v => {
+        var latLngList = v.points.map(p => {
+            return new Leaflet.LatLng(p.gpx.latitude, p.gpx.longitude)
+        })
+
+        let capturedVectorNumber = vectorNumber
+        let color = ((vectorNumber % 2) == 0) ? 'orange' : 'red'
+        var vectorLine = new Leaflet.Polyline(
+          latLngList,
+          { color: color, weight: 4, clickable: true })
+        vectorLine.on('click', e => {
+          this.showPopup(MapPopupFormatter.vector(v, capturedVectorNumber + 1, run.timezoneInfo), null, null, null)
+          e.originalEvent._gpxHandled = true
+          e.originalEvent.stopImmediatePropagation()
+        })
+        vectors.push(vectorLine)
+
+        vectorNumber += 1
+      })
+
+      if (vectors.length > 0) {
+        var vectorLayer = new Leaflet.FeatureGroup(vectors)
+        vectorLayer.addTo(this.map)
+        this.addToMapLayersControl(vectorLayer, '#' + trackNumber + ', #' + runNumber + ' vectors')
+      }
     },
 
     addDiscarded: function (track, trackNumber) {
@@ -344,7 +376,9 @@ export default {
 
     showPopup: function(content, latitude, longitude, selectedPoint) {
       this.gpxInfoControl.showInfo(content)
-      this.showMarker(latitude, longitude)
+      if (latitude && longitude) {
+        this.showMarker(latitude, longitude)
+      }
 
       if (selectedPoint) {
         this.currentlySelectedPoint = selectedPoint
